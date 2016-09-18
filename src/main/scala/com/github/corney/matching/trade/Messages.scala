@@ -22,11 +22,7 @@ object ResponseMessages {
 
   sealed trait ResponseFailure extends Response
 
-  sealed trait OK extends Response
-
-  case object Enqueued extends Response
-
-  case object Processed extends Response
+  case object OK extends Response
 
   case class Balance(clients: Seq[Client]) extends Response
 

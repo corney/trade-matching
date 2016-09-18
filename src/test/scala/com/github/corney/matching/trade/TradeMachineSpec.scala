@@ -41,7 +41,6 @@ class TradeMachineSpec extends TestKit(ActorSystem("TradeMachineSpec")) with Spe
 
       clients.foreach(client => {
         val result = tradeMachine ! SendClient(client)
-        expectMsg(Processed)
       })
 
       tradeMachine ! CheckBalance
@@ -52,28 +51,28 @@ class TradeMachineSpec extends TestKit(ActorSystem("TradeMachineSpec")) with Spe
       }
 
       tradeMachine ! AllClientsTransferred
-      expectMsg(Processed)
+      expectMsg(OK)
 
       ok
     }
 
     "Loads orders" in {
       tradeMachine ! SendOrder(Order("green", BidType.Sell, A, 20, 50))
-      expectMsg(Enqueued)
+
       tradeMachine ! SendOrder(Order("green", BidType.Sell, C, 20, 50))
-      expectMsg(LackOfResources)
+
       tradeMachine ! SendOrder(Order("orange", BidType.Sell, C, 200, 25))
-      expectMsg(Enqueued)
+
       tradeMachine ! SendOrder(Order("yellow", BidType.Buy, A, 20, 50))
-      expectMsg(LackOfResources)
+
       tradeMachine ! SendOrder(Order("pink", BidType.Buy, C, 200, 25))
-      expectMsg(Processed)
+
       tradeMachine ! SendOrder(Order("pink", BidType.Buy, D, 100, 25))
-      expectMsg(Enqueued)
+
       tradeMachine ! SendOrder(Order("yellow", BidType.Sell, D, 100, 25))
-      expectMsg(Processed)
+
       tradeMachine ! SendOrder(Order("pink", BidType.Buy, A, 20, 50))
-      expectMsg(Processed)
+
 
       tradeMachine ! CheckBalance
 
@@ -92,7 +91,7 @@ class TradeMachineSpec extends TestKit(ActorSystem("TradeMachineSpec")) with Spe
 
     "Succesfully stops" in {
       tradeMachine ! Stop
-      expectMsg(Processed)
+      expectMsg(OK)
 
       ok
     }

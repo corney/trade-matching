@@ -1,12 +1,11 @@
 package com.github.corney.matching.trade
 
 import akka.actor.{ActorLogging, FSM}
-import com.github.corney.matching.domain.{BidType, Client, Finance, Order}
-import BidType.BidType
-import Finance.Finance
+import com.github.corney.matching.domain.BidType.BidType
+import com.github.corney.matching.domain.Finance.Finance
+import com.github.corney.matching.domain.{BidType, Client, Order}
 import com.github.corney.matching.trade.RequestMessages._
 import com.github.corney.matching.trade.ResponseMessages._
-
 
 
 /**
@@ -23,7 +22,7 @@ class TradeMachine extends FSM[TradeState, Data] with ActorLogging {
     case Event(Stop, _) =>
       log.debug("Stop message received, terminating...")
       context.system.terminate()
-      stop replying Processed
+      stop replying OK
     case Event(msg, _) =>
       log.info("Unknown message received: %s".format(msg))
       stay replying UnexpectedCommand
@@ -32,10 +31,10 @@ class TradeMachine extends FSM[TradeState, Data] with ActorLogging {
   when(WaitingForClient) {
     case Event(SendClient(client), data) =>
       log.debug("Client(%s) added".format(client.name))
-      stay using Clients(data.clients + (client.name -> client)) replying Processed
+      stay using Clients(data.clients + (client.name -> client))
     case Event(AllClientsTransferred, data) =>
       log.debug("All clients are received, now waiting for orders...")
-      goto(WaitingForOrder) using ClientsAndBids(data.clients, Map.empty) replying Processed
+      goto(WaitingForOrder) using ClientsAndBids(data.clients, Map.empty) replying OK
   }
 
   when(WaitingForOrder) {
@@ -47,52 +46,58 @@ class TradeMachine extends FSM[TradeState, Data] with ActorLogging {
           log.warning("Client(%s) does not exist".format(order.clientName))
           stay replying ClientNotFound
         case Some(client) =>
-          val reverse = OrderKey.reverse(order)
-          orders.get(reverse) match {
-            case Some(Nil) | None =>
-              // Совпадения не найдено, добавляем
-              // Добавляем заказ в очередь
-              if (isOrderValid(order, client)) {
+          if (isOrderValid(order, client)) {
+            val peerKey = OrderKey.peer(order)
+            orders.get(peerKey) match {
+              case Some(Nil) | None =>
+                // Совпадения не найдено, добавляем
+                // Добавляем заказ в очередь
                 log.debug("Order is added to queue")
                 queueOrder(order, clients, orders)
-              } else {
-                log.debug("Order is not valid")
-                stay replying LackOfResources
-              }
+              case Some(peers) =>
+                // Среди всех совпадающих заказов надо найти такой, чтобы был валиден для данной операции
+                // То есть, на счету должно быть достаточно средств для покупки
+                // Или должно быть достаточное количество ценных бумаг для продажи
+                // Кроме того, клиент не должен продавать бумаги сам себе
+                peers.map(o => (o, clients(o.clientName))).find(t => client != t._2 && isOrderValid(t._1, t._2)) match {
+                  case Some((peerOrder, peerClient)) =>
+                    // Совпадение обнаружено, вычисляем новое состояние
+                    val rest = peers.filter(o => peerOrder != o)
 
-            case Some(reverseOrder :: tail) =>
-              // Совпадение обнаружено, вычисляем новое состояние
-              clients.get(reverseOrder.clientName) match {
-                case None =>
-                  // Данной ситуации быть не может, так как мы не разрешаем вставлять заказы от несуществующих клиентов
-                  log.warning("Order from unknown client(%s) are stored".format(reverseOrder.clientName))
-                  stay replying ClientNotFound
-                case Some(reverseClient) =>
-                  // TODO если операция с первым отматченным клиентом не получилась, нужно скипать его и идти дальше
-                  // Пока список клиентов не окажется пустым
-                  // в этом случае нужно просто добавить заявку в очередь
-                  val forwardTransfer = makeTransfer(client, order)
-                  val reverseTransfer = makeTransfer(reverseClient, reverseOrder)
+                    val transfer1 = makeTransfer(client, order)
+                    val transfer2 = makeTransfer(peerClient, peerOrder)
 
-                  (forwardTransfer, reverseTransfer) match {
-                    case (Left(c1), Left(c2)) =>
-                      log.debug("Making transfer between %s and %s".format(client.name, reverseClient.name))
-                      stay using ClientsAndBids(
-                        clients = clients + (c1.name -> c1, c2.name -> c2),
-                        orders = orders + (reverse -> tail)
-                      ) replying Processed
+                    (transfer1, transfer2) match {
+                      case (Left(c1), Left(c2)) =>
+                        log.debug("Making transfer between %s and %s".format(client.name, peerClient.name))
+                        stay using ClientsAndBids(
+                          clients = clients +(c1.name -> c1, c2.name -> c2),
+                          orders = orders + (peerKey -> rest)
+                        )
 
-                    case (Right(failure), _) =>
-                      // Сначала проверяем на ошибку одного клиента
-                      log.debug("Not enough resources to process order")
-                      stay replying failure
-                    case (_, Right(failure)) =>
-                      // TODO вот как раз этого кейза надо избежать
-                      log.warning("Not enough resources to process order 2")
-                      // Потом - второго
-                      stay replying failure
-                  }
-              }
+                      case (Right(failure), _) =>
+                        // Сначала проверяем на ошибку одного клиента
+                        log.debug("Not enough resources to process order")
+                        stay
+                      case (_, Right(failure)) =>
+                        // Потом - второго
+                        // Этого не может произойти
+                        log.warning("Not enough resources to process order")
+                        stay
+
+                    }
+                  case None =>
+                    // В списке заказов не найдено подходящего, добавляем в очередь для последущей обработки
+                    log.debug("Order is added to queue")
+                    queueOrder(order, clients, orders)
+
+                }
+
+            }
+          } else {
+            // Мы не можем выполнить этот заказ, так как для него не хватает ресурсов
+            log.debug("Order is not valid")
+            stay
           }
       }
   }
@@ -114,7 +119,7 @@ class TradeMachine extends FSM[TradeState, Data] with ActorLogging {
       case None =>
         List(order)
     }
-    stay using ClientsAndBids(clients, orders + (key -> updated)) replying Enqueued
+    stay using ClientsAndBids(clients, orders + (key -> updated))
   }
 
   def makeTransfer(client: Client, order: Order): Either[Client, ResponseFailure] = {
@@ -174,7 +179,7 @@ object OrderKey {
     )
   }
 
-  def reverse(order: Order): OrderKey = {
+  def peer(order: Order): OrderKey = {
     OrderKey(
       finance = order.finance,
       bidType = if (order.bidType == BidType.Sell) BidType.Buy else BidType.Sell,

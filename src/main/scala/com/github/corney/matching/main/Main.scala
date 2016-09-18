@@ -10,6 +10,7 @@ import com.github.corney.matching.trade.RequestMessages._
 import com.github.corney.matching.trade.ResponseMessages.Balance
 import com.github.corney.matching.trade.TradeMachine
 
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.io.Source
 
@@ -36,8 +37,11 @@ class Main(config: Config) extends Actor with ActorLogging {
           }
         })
 
-      log.info("done")
+
       tradeMachine ? AllClientsTransferred
+
+      log.info("done")
+
       log.info("Processing orders...")
 
       Source
@@ -46,7 +50,7 @@ class Main(config: Config) extends Actor with ActorLogging {
         .foreach(line => {
           OrderConverter(line) match {
             case Left(order) =>
-              val result = tradeMachine ? SendOrder(order)
+              tradeMachine ? SendOrder(order)
             case Right(error) =>
               log.warning("%s: %s", error, line)
           }
@@ -60,14 +64,18 @@ class Main(config: Config) extends Actor with ActorLogging {
       log.info("Writing new balances...")
       val writer = new PrintWriter(config.result)
       try {
-        balance.foreach(client => writer.println(ClientConverter(client)))
+        balance
+          .sortWith((c1, c2) => c1.name < c2.name)
+          .foreach(client => writer.println(ClientConverter(client)))
       } finally {
         log.info("done")
         writer.close()
       }
 
       log.info("Stopping system...")
-      tradeMachine ? Stop
+
+      val result = tradeMachine ? Stop
+      Await.result(result, 1 seconds)
       context.stop(self)
       log.info("done")
   }
@@ -76,19 +84,18 @@ class Main(config: Config) extends Actor with ActorLogging {
 /**
   * Created by corney on 17.09.16.
   */
-object Main {
-  def main(args: Array[String]) {
+object Main extends App {
 
-    Config.get(args) match {
-      case Some(config) =>
+  Config.get(args) match {
+    case Some(config) =>
 
-        val system = ActorSystem("TradeMachine")
+      val system = ActorSystem("TradeMachine")
 
-        val main = system.actorOf(Props(new Main(config)), "main")
+      val main = system.actorOf(Props(new Main(config)), "main")
 
-        main ! Start
-      case None =>
-      // Do nothing
-    }
+      main ! Start
+    case None =>
+    // Do nothing
   }
+
 }

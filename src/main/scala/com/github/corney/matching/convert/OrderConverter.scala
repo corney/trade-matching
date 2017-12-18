@@ -14,22 +14,22 @@ object OrderConverter {
     val fields = line.split("\t", -1)
     if (fields.length == 5) {
       try {
-        fields(1) match {
+        fields(BID_TYPE_FIELD) match {
           case "b" =>
             Left(Order(
-              clientName = fields(0),
+              clientName = fields(CLIENT_NAME_FIELD),
               bidType = BidType.Buy,
-              finance = Finance.withName(fields(2)),
-              amount = BigInt(fields(3)),
-              price = BigInt(fields(4))
+              finance = Finance.withName(fields(FINANCE_FIELD)),
+              amount = BigInt(fields(AMOUNT_FIELD)),
+              price = BigInt(fields(PRICE_FIELD))
             ))
           case "s" =>
             Left(Order(
-              clientName = fields(0),
+              clientName = fields(CLIENT_NAME_FIELD),
               bidType = BidType.Sell,
-              finance = Finance.withName(fields(2)),
-              amount = BigInt(fields(3)),
-              price = BigInt(fields(4))
+              finance = Finance.withName(fields(FINANCE_FIELD)),
+              amount = BigInt(fields(AMOUNT_FIELD)),
+              price = BigInt(fields(PRICE_FIELD))
             ))
           case _ =>
             Right(WrongFieldValue)
@@ -45,4 +45,9 @@ object OrderConverter {
       Right(WrongNumberOfFields)
     }
   }
+  val CLIENT_NAME_FIELD = 0
+  val BID_TYPE_FIELD = 1
+  val FINANCE_FIELD = 2
+  val AMOUNT_FIELD = 3
+  val PRICE_FIELD = 4
 }
